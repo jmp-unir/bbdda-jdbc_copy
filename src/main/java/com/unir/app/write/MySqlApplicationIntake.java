@@ -1,6 +1,8 @@
 package com.unir.app.write;
 
+import com.opencsv.CSVParserBuilder;
 import com.opencsv.CSVReader;
+import com.opencsv.CSVReaderBuilder;
 import com.opencsv.exceptions.CsvValidationException;
 import com.unir.config.MySqlConnector;
 import com.unir.model.MySqlEmployee;
@@ -51,7 +53,10 @@ public class MySqlApplicationIntake {
 
         // Try-with-resources. Se cierra el reader automáticamente al salir del bloque try
         // CSVReader nos permite leer el fichero CSV linea a linea
-        try (CSVReader reader = new CSVReader(new FileReader("unirEmployees.csv"))) {
+        try (CSVReader reader = new CSVReaderBuilder(
+                new FileReader("unirEmployees.csv"))
+                .withCSVParser(new CSVParserBuilder()
+                .withSeparator(',').build()).build()) {
 
             // Creamos la lista de empleados y el formato de fecha
             List<MySqlEmployee> employees = new LinkedList<>();
