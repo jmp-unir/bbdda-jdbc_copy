@@ -55,8 +55,11 @@ public class MySqlApplication {
         // CSVReader nos permite leer el fichero CSV linea a linea
         try (CSVReader reader = new CSVReaderBuilder(
                 new FileReader("unirEmployees.csv"))
-                .withCSVParser(new CSVParserBuilder()
-                .withSeparator(',').build()).build()) {
+                .withCSVParser(
+                        new CSVParserBuilder()
+                                .withSeparator(',')
+                                .build())
+                .build()) {
 
             // Creamos la lista de empleados y el formato de fecha
             List<MySqlEmployee> employees = new LinkedList<>();
