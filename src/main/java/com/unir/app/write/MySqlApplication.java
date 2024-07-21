@@ -20,7 +20,7 @@ import java.util.List;
  * La tabla de Oracle contiene muchas restricciones y triggers. Por simplicidad, usamos MySQL en este caso.
  */
 @Slf4j
-public class MySqlApplicationIntake {
+public class MySqlApplication {
 
     private static final String DATABASE = "employees";
 
