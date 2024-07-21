@@ -16,7 +16,7 @@ public class MySqlApplication {
         //Try-with-resources. Se cierra la conexión automáticamente al salir del bloque try
         try(Connection connection = new MySqlConnector("localhost", DATABASE).getConnection()) {
 
-            log.info("Conexión establecida con la base de datos Oracle");
+            log.info("Conexión establecida con la base de datos MySQL");
 
             selectAllEmployeesOfDepartment(connection, "d001");
             selectAllEmployeesOfDepartment(connection, "d002");
