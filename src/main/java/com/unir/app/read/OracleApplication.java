@@ -8,13 +8,13 @@ import java.sql.*;
 @Slf4j
 public class OracleApplication {
 
-    private static final String SERIVCE_NAME = "orcl";
+    private static final String SERVICE_NAME = "orcl";
 
     public static void main(String[] args) {
 
         //Creamos conexion. No es necesario indicar puerto en host si usamos el default, 1521
         //Try-with-resources. Se cierra la conexión automáticamente al salir del bloque try
-        try(Connection connection = new OracleDatabaseConnector("localhost", SERIVCE_NAME).getConnection()) {
+        try(Connection connection = new OracleDatabaseConnector("localhost", SERVICE_NAME).getConnection()) {
 
             log.debug("Conexión establecida con la base de datos Oracle");
 
