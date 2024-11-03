@@ -149,6 +149,26 @@ public class MySqlApplication {
         insertStatement.executeBatch();
         updateStatement.executeBatch();
 
+        /**
+         * Para probar en modo DEBUG
+         * Hasta que no se hace commit, los cambios no se reflejan en la base de datos
+         * Es decir, si alguien consulta la base de datos antes de que se ejecute connection.commit(), no verá los cambios
+         * Haz la prueba. Modifica el archivo CSV e incluye un nuevo empleado. Copia la ultima linea y cambia el nombre del empleado (pon algo que sea unico). Pon emp_no 99
+         * Pon un breakpoint en connection.commit() y ejecuta el programa en modo debug.
+         * Abre DataGrip u otro cliente de base de datos y ejecuta la consulta SELECT * FROM employees. Verás que el nuevo empleado no aparece.
+         *
+         * Descomenta el siguiente codigo para probarlo.
+         * Veras que, tras ejecutarse los batch, el empleado con emp_no 99 si existe en esta conexion contra la DB.
+         * Sin embargo, si ejecutas la consulta SELECT * FROM employees en DataGrip, no verás a ese empleado aun.
+         */
+        //PreparedStatement selectStatement = connection.prepareStatement(selectSql);
+        //selectStatement.setInt(1, 99); // Código del empleado
+        //ResultSet resultSet = selectStatement.executeQuery();
+        //resultSet.next(); // Nos movemos a la primera fila
+        //int rowCount = resultSet.getInt(1);
+        //log.debug("El empleado con emp_no 99 existe en esta conexion contra la DB? {}", rowCount > 0);
+
+
         // Hacemos commit y volvemos a activar el autocommit
         connection.commit();
         connection.setAutoCommit(true);
