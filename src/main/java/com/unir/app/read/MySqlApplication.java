@@ -58,7 +58,7 @@ public class MySqlApplication {
     }
 
     /**
-     * Implementacion del ejercicio de MySQL 2.
+     * Implementaci'on del ejercicio de MySQL 2.
      * Mostrar el nombre, apellido y salario de la persona mejor pagada de un departamento concreto (parámetro variable).
      *
      * @param connection
@@ -87,7 +87,7 @@ public class MySqlApplication {
     }
 
     /**
-     * Implementacion del ejercicio de MySQL 4.
+     * Implementaci'on del ejercicio de MySQL 4.
      * Mostrar el número de empleados contratados en un mes concreto (parámetro variable).
      *
      * @param connection
@@ -99,16 +99,16 @@ public class MySqlApplication {
                 "from employees.employees e\n" +
                 "where MONTH(e.hire_date) = ?;");
         countEmployeesHiredInMonth.setInt(1, month);
-        ResultSet employeeCount = countEmployeesHiredInMonth.executeQuery();
+        ResultSet employee = countEmployeesHiredInMonth.executeQuery();
 
-        while (employeeCount.next()) {
+        while (employee.next()) {
             log.debug("Numero de empleados contratados en el mes {}: {}",
-                    month, employeeCount.getString("num_empleados"));
+                    month, employee.getString("num_empleados"));
         }
     }
 
     /**
-     * Implementacion del ejercicio de MySQL 3.
+     * Implementaci'on del ejercicio de MySQL 3.
      * Mostrar el nombre, apellido y salario de la segunda persona mejor pagada de un departamento concreto (parámetro variable).
      * Obs: se utiliza el código de departamento para mostrar una alternativa distinta a la utilizada en el ejercicio 2.
      *

@@ -14,17 +14,12 @@ public class OracleApplication {
 
         //Creamos conexion. No es necesario indicar puerto en host si usamos el default, 1521
         //Try-with-resources. Se cierra la conexión automáticamente al salir del bloque try
-        try (Connection connection = new OracleDatabaseConnector("localhost", SERVICE_NAME).getConnection()) {
+        try(Connection connection = new OracleDatabaseConnector("localhost", SERVICE_NAME).getConnection()) {
 
             log.debug("Conexión establecida con la base de datos Oracle");
 
-            log.info("----------------------------------------------------------------------------");
-            log.info("Resultados ejercicio 1:");
-            selectAllEmployeesAsXml(connection);
-
-            log.info("----------------------------------------------------------------------------");
-            log.info("Resultados ejercicio 2:");
-            selectAllManagersAsXml(connection);
+            selectAllEmployees(connection);
+            selectAllCountriesAsXml(connection);
 
         } catch (Exception e) {
             log.error("Error al tratar con la base de datos", e);
@@ -32,60 +27,47 @@ public class OracleApplication {
     }
 
     /**
-     * Implementacion del ejercicio de Oracle 1.
-     * Mostrar el nombre y apellido de un empleado junto con el nombre de su departamento.
-     *
+     * Ejemplo de consulta a la base de datos usando Statement.
+     * Statement es la forma más básica de ejecutar consultas a la base de datos.
+     * Es la más insegura, ya que no se protege de ataques de inyección SQL.
+     * No obstante, es útil para sentencias DDL.
      * @param connection
      * @throws SQLException
      */
-    private static void selectAllEmployeesAsXml(Connection connection) throws SQLException {
-        Statement selectEmployeesAsXml = connection.createStatement();
-        ResultSet employeesAsXml = selectEmployeesAsXml.executeQuery("SELECT\n" +
-                "    XMLELEMENT(\"empleados\",\n" +
-                "        XMLATTRIBUTES (\n" +
-                "           e.FIRST_NAME as \"nombre\",\n" +
-                "           e.LAST_NAME as \"apellidos\",\n" +
-                "           d.DEPARTMENT_NAME as \"departamento\"\n" +
-                "        )\n" +
-                "    )\n" +
-                "AS empleados\n" +
-                "FROM EMPLOYEES e JOIN DEPARTMENTS d ON e.DEPARTMENT_ID = d.DEPARTMENT_ID");
+    private static void selectAllEmployees(Connection connection) throws SQLException {
+        Statement selectEmployees = connection.createStatement();
+        ResultSet employees = selectEmployees.executeQuery("select * from EMPLOYEES");
 
-        while (employeesAsXml.next()) {
-            log.debug("Employee: {}", employeesAsXml.getString("empleados"));
+        while (employees.next()) {
+            log.debug("Employee: {} {}",
+                    employees.getString("FIRST_NAME"),
+                    employees.getString("LAST_NAME"));
         }
     }
 
     /**
-     * Implementacion del ejercicio de Oracle 2.
-     * Mostrar el nombre, apellido, nombre de departamento, ciudad y pais de los empleados que son Managers.
-     *
+     * Ejemplo de consulta a la base de datos usando PreparedStatement y SQL/XML.
+     * Para usar SQL/XML, es necesario que la base de datos tenga instalado el módulo XDB.
+     * En Oracle 19c, XDB viene instalado por defecto.
+     * Ademas, se necesitan las dependencias que se encuentran en el pom.xml.
      * @param connection
      * @throws SQLException
      */
-    private static void selectAllManagersAsXml(Connection connection) throws SQLException {
-        Statement selectManagersAsXml = connection.createStatement();
-        ResultSet managersAsXml = selectManagersAsXml.executeQuery("SELECT\n" +
-                "    XMLELEMENT(\"managers\",\n" +
-                "       XMLAGG(\n" +
-                "           XMLELEMENT(\"manager\",\n" +
-                "                XMLFOREST (\n" +
-                "                    XMLFOREST(e.FIRST_NAME as \"nombre\", e.LAST_NAME as \"apellido\") as \"nombreCompleto\",\n" +
-                "                    d.DEPARTMENT_NAME as \"department\",\n" +
-                "                    l.CITY as \"city\",\n" +
-                "                    c.COUNTRY_NAME as \"country\"\n" +
-                "                )\n" +
-                "           )\n" +
-                "       )\n" +
-                "    ) AS managersXml\n" +
-                "FROM EMPLOYEES e\n" +
-                "         JOIN DEPARTMENTS d ON e.DEPARTMENT_ID = d.DEPARTMENT_ID\n" +
-                "         JOIN LOCATIONS l ON d.LOCATION_ID = l.LOCATION_ID\n" +
-                "         JOIN COUNTRIES c ON l.COUNTRY_ID = c.COUNTRY_ID\n" +
-                "WHERE e.EMPLOYEE_ID IN (SELECT DISTINCT m.MANAGER_ID FROM EMPLOYEES m)");
+    private static void selectAllCountriesAsXml(Connection connection) throws SQLException {
+        PreparedStatement selectCountries = connection.prepareStatement("SELECT\n" +
+                "  XMLELEMENT(\"countryXml\",\n" +
+                "       XMLATTRIBUTES(\n" +
+                "         c.country_name AS \"name\",\n" +
+                "         c.region_id AS \"code\",\n" +
+                "         c.country_id AS \"id\"))\n" +
+                "  AS CountryXml\n" +
+                "FROM  countries c\n" +
+                "WHERE c.country_name LIKE ?");
+        selectCountries.setString(1, "S%");
 
-        while (managersAsXml.next()) {
-            log.debug("Managers: {}", managersAsXml.getString("managersXml"));
+        ResultSet countries = selectCountries.executeQuery();
+        while (countries.next()) {
+            log.debug("Country as XML: {}", countries.getString("CountryXml"));
         }
     }
 }
