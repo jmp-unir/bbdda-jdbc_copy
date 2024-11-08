@@ -5,8 +5,11 @@ import com.opencsv.CSVReader;
 import com.opencsv.CSVReaderBuilder;
 import com.opencsv.exceptions.CsvValidationException;
 import com.unir.config.MySqlConnector;
+import com.unir.model.MySqlDepartment;
 import com.unir.model.MySqlEmployee;
+import com.unir.model.MySqlEmployeeDepartment;
 import lombok.extern.slf4j.Slf4j;
+
 import java.io.FileReader;
 import java.io.IOException;
 import java.sql.*;
@@ -34,47 +37,241 @@ public class MySqlApplication {
                     , System.getProperty("user.dir"));
             log.info("Conexión establecida con la base de datos MySQL");
 
-            // Leemos los datos del fichero CSV
-            List<MySqlEmployee> employees = readData();
-
-            // Introducimos los datos en la base de datos
-            intake(connection, employees);
+            addDepartmentsAndEmployees(connection);
 
         } catch (Exception e) {
             log.error("Error al tratar con la base de datos", e);
         }
     }
 
+    private static void addDepartmentsAndEmployees(Connection connection) throws SQLException {
+
+        // quitar autocommit
+        connection.setAutoCommit(false);
+
+        // actualizar tabla departamentos
+        addOrUpdateDepartments(connection, "newDepartments.csv");
+
+        // actualizar datos de empleados
+        addOrUpdateEmployees(connection, "newEmployeesInDepartments.csv");
+
+        //commit transaccion y restaurar autocommit
+        connection.commit();
+        connection.setAutoCommit(true);
+
+    }
+
     /**
-     * Lee los datos del fichero CSV y los devuelve en una lista de empleados.
-     * El fichero CSV debe estar en la raíz del proyecto.
-     *
-     * @return - Lista de empleados
+     * Lee todos los departamentos de un archivo csv y los anade a o actualiza en BD
+     * @param connection
+     * @param departmentsFilePath
+     * @throws SQLException
      */
-    private static List<MySqlEmployee> readData() {
+    private static void addOrUpdateDepartments(Connection connection, String departmentsFilePath) throws SQLException {
+        // crear objectos de departamentos
+        List<MySqlDepartment> newDepartments = readDepartments(departmentsFilePath);
 
-        // Try-with-resources. Se cierra el reader automáticamente al salir del bloque try
-        // CSVReader nos permite leer el fichero CSV linea a linea
-        try (CSVReader reader = new CSVReaderBuilder(
-                new FileReader("unirEmployees.csv"))
-                .withCSVParser(
-                        new CSVParserBuilder()
-                                .withSeparator(',')
-                                .build())
+        // crear queries de select, insert y update
+        String selectSql = "SELECT COUNT(*) FROM departments WHERE dept_no = ?";
+        String insertSql = "INSERT INTO departments (dept_no, dept_name) VALUES (?, ?)";
+        String updateSql = "UPDATE departments SET dept_name = ? WHERE dept_no = ?";
+
+        // crear registros en BD
+        for (MySqlDepartment department : newDepartments) {
+            // ejecutamos query de select para ver si el departamento existe
+            PreparedStatement selectStatement = connection.prepareStatement(selectSql);
+            selectStatement.setString(1, department.getDeptNo());
+            ResultSet resultSet = selectStatement.executeQuery();
+            resultSet.next();
+
+            // preparamos statements de insert o update
+            PreparedStatement updateDepartment = connection.prepareStatement(updateSql);
+            PreparedStatement insertDepartment = connection.prepareStatement(insertSql);
+            if (resultSet.getInt(1) > 0) { // el departamento existe => actualizamos registro existente
+                updateDepartment.setString(1, department.getDeptName());
+                updateDepartment.setString(2, department.getDeptNo());
+                updateDepartment.addBatch();
+            } else {
+                insertDepartment.setString(1, department.getDeptNo());
+                insertDepartment.setString(2, department.getDeptName());
+                insertDepartment.addBatch();
+            }
+
+            // ejecutamos batch
+            updateDepartment.executeBatch();
+            insertDepartment.executeBatch();
+        }
+
+    }
+
+    /**
+     * Compone una lista de objetos MySqlDepartment a partir de registros en un archivo csv
+     * @param departmentsFilePath
+     * @return
+     */
+    private static List<MySqlDepartment> readDepartments(String departmentsFilePath) {
+        try(CSVReader reader = new CSVReaderBuilder(new FileReader(departmentsFilePath))
+                .withCSVParser(new CSVParserBuilder().withSeparator(',').build())
                 .build()) {
+            // inicializamos lista
+            List<MySqlDepartment> departments = new LinkedList<>();
 
-            // Creamos la lista de empleados y el formato de fecha
-            List<MySqlEmployee> employees = new LinkedList<>();
-            SimpleDateFormat format = new SimpleDateFormat("yyy-MM-dd");
-
-            // Saltamos la primera linea, que contiene los nombres de las columnas del CSV
+            // saltamos cabecera del csv
             reader.skip(1);
             String[] nextLine;
-
-            // Leemos el fichero linea a linea
+            // iteramos por lineas del csv creando objetos de departamento
             while((nextLine = reader.readNext()) != null) {
+                MySqlDepartment departament = new MySqlDepartment(nextLine[0], nextLine[1]);
+                departments.add(departament);
+            }
+            return departments;
+        } catch (CsvValidationException | IOException e) {
+            throw new RuntimeException("Error al leer el archivo " + departmentsFilePath, e);
+        }
+    }
 
-                // Creamos el empleado y lo añadimos a la lista
+    /**
+     * Lee de 10 en 10 registros de empleados y sus departamentos asignados de un archivo csv
+     * y los añade a o actualiza en BD
+     * @param connection
+     * @param employeesFilePath
+     */
+    private static void addOrUpdateEmployees(Connection connection, String employeesFilePath) {
+
+        try {
+            // leer csv
+            CSVReader reader = new CSVReaderBuilder(new FileReader(employeesFilePath))
+                    .withCSVParser(new CSVParserBuilder().withSeparator(',').build())
+                    .build();
+
+            reader.skip(1); // saltamos la cabecera
+            String[] nextLine = reader.readNext(); // leemos primera linea de datos
+            while (nextLine != null) {
+
+                // crear siguiente batch de objetos de empleados y empDept
+                List<EmployeeAndEmpDept> employeeAndEmpDepts = getBatchOfEmployeeAndEmpDepts(reader, nextLine, 10);
+
+                try {
+
+                    // crear/actualizar registros de empleados en BD
+                    updateEmployeeTable(connection, employeeAndEmpDepts);
+
+                    // crear/actualizar registros de emp_dept en BD
+                    updateEmpDeptTable(connection, employeeAndEmpDepts);
+
+                } catch (SQLException e) {
+                    log.error("Error al tratar con la base de datos", e);
+                }
+
+                nextLine = reader.readNext();
+            }
+
+            //cerrar reader
+            reader.close();
+        } catch (IOException | CsvValidationException e) {
+            throw new RuntimeException("Error al leer el archivo " + employeesFilePath, e);
+        }
+    }
+
+    /**
+     * Actualiza la tabla dept_emp de BD con los datos de un alista de objetos de empleados y sus departamentos
+     * @param connection
+     * @param employeeAndEmpDepts
+     * @throws SQLException
+     */
+    private static void updateEmpDeptTable(Connection connection, List<EmployeeAndEmpDept> employeeAndEmpDepts) throws SQLException {
+        // crear queries de select, insert y update
+        String selectSql = "SELECT COUNT(*) FROM dept_emp WHERE emp_no = ? AND dept_no = ?";
+        String insertSql = "INSERT INTO dept_emp (emp_no, dept_no, from_date, to_date) VALUES (?, ?, ?, ?)";
+        String updateSql = "UPDATE dept_emp SET from_date = ?, to_date = ? WHERE emp_no = ? AND dept_no = ?";
+
+        // crear registros en BD
+        for (EmployeeAndEmpDept employeeAndEmpDept : employeeAndEmpDepts) {
+            MySqlEmployeeDepartment deptEmp = employeeAndEmpDept.empDept();
+            // ejecutamos query de select para ver si el la combinacion de empleado y departamento existe
+            PreparedStatement selectStatement = connection.prepareStatement(selectSql);
+            selectStatement.setInt(1, deptEmp.getEmpNo());
+            selectStatement.setString(2, deptEmp.getDeptNo());
+            ResultSet resultSet = selectStatement.executeQuery();
+            resultSet.next();
+
+            // preparamos statements de insert o update
+            PreparedStatement updateDeptEmp = connection.prepareStatement(updateSql);
+            PreparedStatement insertDeptEmp = connection.prepareStatement(insertSql);
+            if (resultSet.getInt(1) > 0) { // el combinado empleado/departamento existe => actualizamos registro existente
+                updateDeptEmp.setDate(1, deptEmp.getFromDate());
+                updateDeptEmp.setDate(2, deptEmp.getToDate());
+                updateDeptEmp.setInt(3, deptEmp.getEmpNo());
+                updateDeptEmp.setString(4, deptEmp.getDeptNo());
+                updateDeptEmp.addBatch();
+            } else {
+                insertDeptEmp.setInt(1, deptEmp.getEmpNo());
+                insertDeptEmp.setString(2, deptEmp.getDeptNo());
+                insertDeptEmp.setDate(3, deptEmp.getFromDate());
+                insertDeptEmp.setDate(4, deptEmp.getToDate());
+                insertDeptEmp.addBatch();
+            }
+
+            // ejecutamos batch
+            updateDeptEmp.executeBatch();
+            insertDeptEmp.executeBatch();
+        }
+    }
+
+    /**
+     * Actualiza la tabla employees de BD a partir de una lista de objetos de empleados y sus departamentos
+     * @param connection
+     * @param employeeAndEmpDepts
+     * @throws SQLException
+     */
+    private static void updateEmployeeTable(Connection connection, List<EmployeeAndEmpDept> employeeAndEmpDepts) throws SQLException {
+        // crear queries de select, insert y update
+        String selectSql = "SELECT COUNT(*) FROM employees WHERE emp_no = ?";
+        String insertSql = "INSERT INTO employees (emp_no, first_name, last_name, gender, hire_date, birth_date) "
+                + "VALUES (?, ?, ?, ?, ?, ?)";
+        String updateSql = "UPDATE employees SET first_name = ?, last_name = ?, gender = ?, hire_date = ?, birth_date = ? WHERE emp_no = ?";
+
+        // crear registros en BD
+        for (EmployeeAndEmpDept employeeAndEmpDept : employeeAndEmpDepts) {
+            MySqlEmployee employee = employeeAndEmpDept.employee();
+            // ejecutamos query de select para ver si el empleado existe
+            PreparedStatement selectStatement = connection.prepareStatement(selectSql);
+            selectStatement.setInt(1, employee.getEmployeeId());
+            ResultSet resultSet = selectStatement.executeQuery();
+            resultSet.next();
+
+            // preparamos statements de insert o update
+            PreparedStatement updateEmployee = connection.prepareStatement(updateSql);
+            PreparedStatement insertEmployee = connection.prepareStatement(insertSql);
+            if (resultSet.getInt(1) > 0) { // el empleado existe => actualizamos registro existente
+                fillUpdateStatement(updateEmployee, employee);
+                updateEmployee.addBatch();
+            } else {
+                fillInsertStatement(insertEmployee, employee);
+                insertEmployee.addBatch();
+            }
+
+            // ejecutamos batch
+            updateEmployee.executeBatch();
+            insertEmployee.executeBatch();
+        }
+    }
+
+    /**
+     * Lee lineas de un csv de empleados y empleadoEnDepartamente de 10 en 10
+     * Devuelve una lista de objetos con datos del empleado y de la relacion del
+     * empleado con departamento
+     * @param reader
+     * @param batchSize
+     * @return List<EmployeeAndEmpDept>
+     */
+    private static List<EmployeeAndEmpDept> getBatchOfEmployeeAndEmpDepts(CSVReader reader, String[] firstLine, int batchSize) {
+        List<EmployeeAndEmpDept> employeeAndEmpDepts = new LinkedList<>();
+        String[] nextLine = firstLine;
+        int lineCount = 0;
+        try {
+            while(lineCount < batchSize && nextLine != null) {
+                SimpleDateFormat format = new SimpleDateFormat("yyy-MM-dd");
                 MySqlEmployee employee = new MySqlEmployee(
                         Integer.parseInt(nextLine[0]),
                         nextLine[1],
@@ -83,96 +280,32 @@ public class MySqlApplication {
                         new Date(format.parse(nextLine[4]).getTime()),
                         new Date(format.parse(nextLine[5]).getTime())
                 );
-                employees.add(employee);
+
+                MySqlEmployeeDepartment empDept = new MySqlEmployeeDepartment(
+                        Integer.parseInt(nextLine[0]),
+                        nextLine[6],
+                        new Date(format.parse(nextLine[7]).getTime()),
+                        new Date(format.parse(nextLine[8]).getTime())
+                );
+
+                employeeAndEmpDepts.add(new EmployeeAndEmpDept(employee, empDept));
+                lineCount++;
+                // si no hemos alcanzado el tamaño del batch, seguimos leyendo del csv
+                if (lineCount < batchSize) nextLine = reader.readNext();
             }
-            return employees;
-        } catch (IOException e) {
-            log.error("Error al leer el fichero CSV", e);
-            throw new RuntimeException(e);
-        } catch (CsvValidationException | ParseException e) {
-            throw new RuntimeException(e);
+            return employeeAndEmpDepts;
+        } catch (IOException | CsvValidationException | ParseException e) {
+            throw new RuntimeException("Error while reading csv data", e);
         }
     }
 
     /**
-     * Introduce los datos en la base de datos.
-     * Si el empleado ya existe, se actualiza.
-     * Si no existe, se inserta.
-     *
-     * Toma como referencia el campo emp_no para determinar si el empleado existe o no.
-     * @param connection - Conexión a la base de datos
-     * @param employees - Lista de empleados
-     * @throws SQLException - Error al ejecutar la consulta
+     * Registro que contiene un objeto Employee y su objeto EmployeeDepartment relacionado
+     * @param employee
+     * @param empDept
      */
-    private static void intake(Connection connection, List<MySqlEmployee> employees) throws SQLException {
+    record EmployeeAndEmpDept(MySqlEmployee employee, MySqlEmployeeDepartment empDept) {}
 
-        String selectSql = "SELECT COUNT(*) FROM employees WHERE emp_no = ?";
-        String insertSql = "INSERT INTO employees (emp_no, first_name, last_name, gender, hire_date, birth_date) "
-                + "VALUES (?, ?, ?, ?, ?, ?)";
-        String updateSql = "UPDATE employees SET first_name = ?, last_name = ?, gender = ?, hire_date = ?, birth_date = ? WHERE emp_no = ?";
-        int lote = 5;
-        int contador = 0;
-
-        // Preparamos las consultas, una unica vez para poder reutilizarlas en el batch
-        PreparedStatement insertStatement = connection.prepareStatement(insertSql);
-        PreparedStatement updateStatement = connection.prepareStatement(updateSql);
-
-        // Desactivamos el autocommit para poder ejecutar el batch y hacer commit al final
-        connection.setAutoCommit(false);
-
-        for (MySqlEmployee employee : employees) {
-
-            // Comprobamos si el empleado existe
-            PreparedStatement selectStatement = connection.prepareStatement(selectSql);
-            selectStatement.setInt(1, employee.getEmployeeId()); // Código del empleado
-            ResultSet resultSet = selectStatement.executeQuery();
-            resultSet.next(); // Nos movemos a la primera fila
-            int rowCount = resultSet.getInt(1);
-
-            // Si existe, actualizamos. Si no, insertamos
-            if(rowCount > 0) {
-                fillUpdateStatement(updateStatement, employee);
-                updateStatement.addBatch();
-            } else {
-                fillInsertStatement(insertStatement, employee);
-                insertStatement.addBatch();
-            }
-
-            // Ejecutamos el batch cada lote de registros
-            if (++contador % lote == 0) {
-                updateStatement.executeBatch();
-                insertStatement.executeBatch();
-            }
-        }
-
-        // Ejecutamos el batch final
-        insertStatement.executeBatch();
-        updateStatement.executeBatch();
-
-        /**
-         * Para probar en modo DEBUG
-         * Hasta que no se hace commit, los cambios no se reflejan en la base de datos
-         * Es decir, si alguien consulta la base de datos antes de que se ejecute connection.commit(), no verá los cambios
-         * Haz la prueba. Modifica el archivo CSV e incluye un nuevo empleado. Copia la ultima linea y cambia el nombre del empleado (pon algo que sea unico). Pon emp_no 99
-         * Pon un breakpoint en connection.commit() y ejecuta el programa en modo debug.
-         * Abre DataGrip u otro cliente de base de datos y ejecuta la consulta SELECT * FROM employees. Verás que el nuevo empleado no aparece.
-         *
-         * Descomenta el siguiente codigo para probarlo.
-         * Veras que, tras ejecutarse los batch, el empleado con emp_no 99 si existe en esta conexion contra la DB.
-         * Sin embargo, si ejecutas la consulta SELECT * FROM employees en DataGrip, no verás a ese empleado aun.
-         */
-        //PreparedStatement selectStatement = connection.prepareStatement(selectSql);
-        //selectStatement.setInt(1, 99); // Código del empleado
-        //ResultSet resultSet = selectStatement.executeQuery();
-        //resultSet.next(); // Nos movemos a la primera fila
-        //int rowCount = resultSet.getInt(1);
-        //log.debug("El empleado con emp_no 99 existe en esta conexion contra la DB? {}", rowCount > 0);
-
-
-        // Hacemos commit y volvemos a activar el autocommit
-        connection.commit();
-        connection.setAutoCommit(true);
-    }
 
     /**
      * Rellena los parámetros de un PreparedStatement para una consulta INSERT.
@@ -205,25 +338,5 @@ public class MySqlApplication {
         statement.setDate(4, employee.getHireDate());
         statement.setDate(5, employee.getBirthDate());
         statement.setInt(6, employee.getEmployeeId());
-    }
-
-    /**
-     * Devuelve el último id de una columna de una tabla.
-     * Util para obtener el siguiente id a insertar.
-     *
-     * @param connection - Conexión a la base de datos
-     * @param table - Nombre de la tabla
-     * @param fieldName - Nombre de la columna
-     * @return - Último id de la columna
-     * @throws SQLException - Error al ejecutar la consulta
-     */
-    private static int lastId(Connection connection, String table, String fieldName) throws SQLException {
-        String selectSql = "SELECT MAX(?) FROM ?";
-        PreparedStatement selectStatement = connection.prepareStatement(selectSql);
-        selectStatement.setString(1, fieldName);
-        selectStatement.setString(2, table);
-        ResultSet resultSet = selectStatement.executeQuery();
-        resultSet.next(); // Nos movemos a la primera fila
-        return resultSet.getInt(1);
     }
 }
